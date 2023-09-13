@@ -2,7 +2,7 @@
 A simple-to-use IPC library using named pipes and MessagePack.
 
 ## Links
-NuGet: https://www.nuget.org/packages/Nihs.SimpleIpc/  
+NuGet: https://www.nuget.org/packages/Bitbound.SimpleIpc/  
 
 ## Quick Start
 

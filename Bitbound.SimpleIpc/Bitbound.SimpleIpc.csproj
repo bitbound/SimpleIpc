@@ -8,7 +8,7 @@
     <Description>A simple-to-use IPC library using named pipes and MessagePack.</Description>
     <Copyright>(c) Jared Goodwin 2023</Copyright>
     <PackageProjectUrl>https://github.com/lucent-sea/SimpleIpc</PackageProjectUrl>
-    <PackageIcon>nihs.png</PackageIcon>
+    <PackageIcon>bitbound.png</PackageIcon>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/lucent-sea/SimpleIpc</RepositoryUrl>
     <PackageTags>ipc;pipes;netstandard</PackageTags>
@@ -21,7 +21,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="..\.assets\nihs.png">
+    <None Include="..\.assets\bitbound.png">
       <Pack>True</Pack>
       <PackagePath>\</PackagePath>
     </None>
@@ -32,11 +32,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="MessagePack" Version="2.5.108" />
+    <PackageReference Include="MessagePack" Version="2.5.124" />
     <PackageReference Include="Microsoft.CSharp" Version="4.7.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="7.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="7.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="7.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="7.0.1" />
   </ItemGroup>
 
 </Project>

@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using System;
 using System.IO.Pipes;
+using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -23,12 +24,29 @@ namespace SimpleIpc
             _pipeStream = new NamedPipeServerStream(
                 pipeName,
                 PipeDirection.InOut,
-                NamedPipeServerStream.MaxAllowedServerInstances,
+                1,
                 PipeTransmissionMode.Byte,
                 PipeOptions.Asynchronous);
         }
 
-
+        [SupportedOSPlatform("windows")]
+        public IpcServer(
+            string pipeName,
+            PipeSecurity pipeSecurity,
+            ICallbackStoreFactory callbackFactory,
+            ILogger<IpcServer> logger)
+            : base(pipeName, callbackFactory, logger)
+        {
+            _pipeStream = NamedPipeServerStreamAcl.Create(
+                pipeName,
+                PipeDirection.InOut,
+                1,
+                PipeTransmissionMode.Byte,
+                PipeOptions.Asynchronous,
+                0,
+                0,
+                pipeSecurity);
+        }
 
         public async Task<bool> WaitForConnection(CancellationToken cancellationToken)
         {

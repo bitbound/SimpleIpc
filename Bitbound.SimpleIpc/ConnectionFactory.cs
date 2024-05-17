@@ -1,5 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using System;
+using System.IO.Pipes;
+using System.Runtime.Versioning;
 using System.Threading.Tasks;
 
 namespace SimpleIpc
@@ -8,6 +10,8 @@ namespace SimpleIpc
     {
         Task<IIpcClient> CreateClient(string serverName, string pipeName);
         Task<IIpcServer> CreateServer(string pipeName);
+        [SupportedOSPlatform("windows")]
+        Task<IIpcServer> CreateServer(string pipeName, PipeSecurity pipeSecurity);
     }
 
     public class IpcConnectionFactory : IIpcConnectionFactory
@@ -41,6 +45,17 @@ namespace SimpleIpc
             var server = new IpcServer(
                 pipeName, 
                 _callbackFactory, 
+                _loggerFactory.CreateLogger<IpcServer>());
+            return Task.FromResult((IIpcServer)server);
+        }
+
+        [SupportedOSPlatform("windows")]
+        public Task<IIpcServer> CreateServer(string pipeName, PipeSecurity pipeSecurity)
+        {
+            var server = new IpcServer(
+                pipeName,
+                pipeSecurity,
+                _callbackFactory,
                 _loggerFactory.CreateLogger<IpcServer>());
             return Task.FromResult((IIpcServer)server);
         }

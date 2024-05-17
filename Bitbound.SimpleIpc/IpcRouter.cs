@@ -1,6 +1,9 @@
 ﻿using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
+using System.IO.Pipes;
+using System.Runtime.Versioning;
 using System.Threading.Tasks;
 
 namespace SimpleIpc
@@ -24,29 +27,34 @@ namespace SimpleIpc
         /// <returns></returns>
         Task<IIpcServer> CreateServer(string pipeName);
 
-        bool TryGetServer(string pipeName, out IIpcServer server);
+        /// <summary>
+        /// Creates a message-based IIpcServer that handle messages via registered callbacks.
+        /// Message callbacks can be registered using IIpcServer.On method.
+        /// </summary>
+        /// <param name="pipeName">The pipe name to use for the IpcServer.</param>
+        /// <param name="pipeSecurity">Security attributes to add to the pipe server.</param>
+        /// <returns></returns>
+        Task<IIpcServer> CreateServer(string pipeName, PipeSecurity pipeSecurity);
 
-        bool TryRemoveServer(string pipeName, out IIpcServer server);
+        bool TryGetServer(string pipeName, [NotNullWhen(true)] out IIpcServer? server);
+
+        bool TryRemoveServer(string pipeName, [NotNullWhen(true)] out IIpcServer? server);
 
     }
 
     public class IpcRouter : IIpcRouter
     {
-        private static IpcRouter? _default;
-        public static IIpcRouter Default => _default ??= new IpcRouter(IpcConnectionFactory.Default, new LoggerFactory().CreateLogger<IpcRouter>());
-
         private static readonly ConcurrentDictionary<string, IIpcServer> _pipeStreams = new();
-
-        private readonly IIpcConnectionFactory _serverFactory;
+        private static IpcRouter? _default;
         private readonly ILogger<IpcRouter> _logger;
-
+        private readonly IIpcConnectionFactory _serverFactory;
         public IpcRouter(IIpcConnectionFactory serverFactory, ILogger<IpcRouter> logger)
         {
             _serverFactory = serverFactory ?? throw new ArgumentNullException(nameof(serverFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-
+        public static IIpcRouter Default => _default ??= new IpcRouter(IpcConnectionFactory.Default, new LoggerFactory().CreateLogger<IpcRouter>());
         public async Task<IIpcServer> CreateServer()
         {
             var pipeName = Guid.NewGuid().ToString();
@@ -58,12 +66,18 @@ namespace SimpleIpc
             return await CreateServerInternal(pipeName);
         }
 
-        public bool TryGetServer(string pipeName, out IIpcServer server)
+        [SupportedOSPlatform("windows")]
+        public async Task<IIpcServer> CreateServer(string pipeName, PipeSecurity pipeSecurity)
+        {
+            return await CreateServerInternal(pipeName, pipeSecurity);
+        }
+
+        public bool TryGetServer(string pipeName, [NotNullWhen(true)] out IIpcServer? server)
         {
             return _pipeStreams.TryGetValue(pipeName, out server);
         }
 
-        public bool TryRemoveServer(string pipeName, out IIpcServer server)
+        public bool TryRemoveServer(string pipeName, [NotNullWhen(true)] out IIpcServer? server)
         {
             return _pipeStreams.TryRemove(pipeName, out server);
         }
@@ -89,7 +103,29 @@ namespace SimpleIpc
             return serverConnection;
         }
 
-        private void ServerConnection_ReadingEnded(object sender, IConnectionBase args)
+        [SupportedOSPlatform("windows")]
+        private async Task<IIpcServer> CreateServerInternal(string pipeName, PipeSecurity pipeSecurity)
+        {
+            if (string.IsNullOrWhiteSpace(pipeName))
+            {
+                throw new ArgumentNullException(nameof(pipeName));
+            }
+
+            _logger.LogDebug("Creating pipe message server {name}.", pipeName);
+
+            var serverConnection = await _serverFactory.CreateServer(pipeName, pipeSecurity);
+
+            serverConnection.ReadingEnded += ServerConnection_ReadingEnded;
+
+            if (!_pipeStreams.TryAdd(pipeName, serverConnection))
+            {
+                throw new ArgumentException("The pipe name is already in use.");
+            }
+
+            return serverConnection;
+        }
+
+        private void ServerConnection_ReadingEnded(object? sender, IConnectionBase args)
         {
             if (_pipeStreams.TryRemove(args.PipeName, out var server))
             {

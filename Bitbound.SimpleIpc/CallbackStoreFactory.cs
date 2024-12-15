@@ -1,27 +1,19 @@
 ﻿using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
-namespace SimpleIpc
+namespace Bitbound.SimpleIpc;
+
+public interface ICallbackStoreFactory
 {
-    public interface ICallbackStoreFactory
-    {
-        ICallbackStore Create();
-    }
+  ICallbackStore Create();
+}
 
-    public class CallbackStoreFactory : ICallbackStoreFactory
-    {
-        private readonly ILoggerFactory _loggerFactory;
+public class CallbackStoreFactory(ILoggerFactory loggerFactory) : ICallbackStoreFactory
+{
+  private readonly ILoggerFactory _loggerFactory = loggerFactory;
 
-        public CallbackStoreFactory(ILoggerFactory loggerFactory)
-        {
-            _loggerFactory = loggerFactory;
-        }
-        public ICallbackStore Create()
-        {
-            var logger = _loggerFactory.CreateLogger<CallbackStore>();
-            return new CallbackStore(logger);
-        }
-    }
+  public ICallbackStore Create()
+  {
+    var logger = _loggerFactory.CreateLogger<CallbackStore>();
+    return new CallbackStore(logger);
+  }
 }

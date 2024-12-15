@@ -1,20 +1,19 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Runtime.Serialization;
-using System.Text;
+﻿using System.Runtime.Serialization;
 
-namespace SimpleIpc
+namespace Bitbound.SimpleIpc;
+
+[DataContract]
+public enum MessageType
 {
-    [DataContract]
-    public enum MessageType
-    {
-        [EnumMember]
-        Unspecified,
-        [EnumMember]
-        Send,
-        [EnumMember]
-        Invoke,
-        [EnumMember]
-        Response
-    }
+  [EnumMember]
+  Unspecified,
+
+  [EnumMember]
+  Send,
+
+  [EnumMember]
+  Invoke,
+
+  [EnumMember]
+  Response
 }

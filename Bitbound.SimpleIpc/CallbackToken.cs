@@ -1,21 +1,41 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
 
-namespace SimpleIpc
+namespace Bitbound.SimpleIpc;
+
+public readonly struct CallbackToken : IEquatable<CallbackToken>
 {
-    public readonly struct CallbackToken : IEquatable<CallbackToken>
+  public CallbackToken()
+  {
+    Id = Guid.NewGuid();
+  }
+
+  public Guid Id { get; }
+
+  public static bool operator !=(CallbackToken left, CallbackToken right)
+  {
+    return !(left == right);
+  }
+
+  public static bool operator ==(CallbackToken left, CallbackToken right)
+  {
+    return left.Equals(right);
+  }
+
+  public bool Equals(CallbackToken other)
+  {
+    return Id == other.Id;
+  }
+
+  public override bool Equals(object? obj)
+  {
+    if (obj is not CallbackToken other)
     {
-        public CallbackToken()
-        {
-            Id = Guid.NewGuid();
-        }
-
-        public Guid Id { get; }
-
-        public bool Equals(CallbackToken other)
-        {
-            return Id == other.Id;
-        }
+      return false;
     }
+    return Equals(other);
+  }
+  public override int GetHashCode()
+  {
+    return Id.GetHashCode();
+  }
 }

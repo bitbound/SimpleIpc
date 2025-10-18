@@ -1,13 +1,14 @@
 ﻿using Microsoft.Extensions.Logging;
 using System;
 using System.IO.Pipes;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Bitbound.SimpleIpc;
 
 public interface IIpcClient : IConnectionBase
 {
-  Task<bool> Connect(int timeout);
+  Task<bool> Connect(CancellationToken cancellationToken);
 }
 
 internal class IpcClient : ConnectionBase, IIpcClient
@@ -16,8 +17,9 @@ internal class IpcClient : ConnectionBase, IIpcClient
       string serverName,
       string pipeName,
       ICallbackStoreFactory callbackFactory,
+      IContentTypeResolver contentTypeResolver,
       ILogger<IpcClient> logger)
-      : base(pipeName, callbackFactory, logger)
+      : base(pipeName, callbackFactory, contentTypeResolver, logger)
   {
     _pipeStream = new NamedPipeClientStream(
         serverName,
@@ -26,15 +28,15 @@ internal class IpcClient : ConnectionBase, IIpcClient
         PipeOptions.Asynchronous);
   }
 
-  public async Task<bool> Connect(int timeout)
+  public async Task<bool> Connect(CancellationToken cancellationToken)
   {
     try
     {
-      await _connectLock.WaitAsync();
+      await _connectLock.WaitAsync(cancellationToken);
 
       if (_pipeStream is NamedPipeClientStream clientPipe)
       {
-        await clientPipe.ConnectAsync(timeout);
+        await clientPipe.ConnectAsync(cancellationToken);
         _logger.LogDebug("Connection established for client pipe {id}.", PipeName);
       }
       else

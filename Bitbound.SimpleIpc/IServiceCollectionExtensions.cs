@@ -7,6 +7,7 @@ public static class IServiceCollectionExtensions
   public static IServiceCollection AddSimpleIpc(this IServiceCollection services)
   {
     services.AddLogging();
+    services.AddSingleton<IContentTypeResolver, ContentTypeResolver>();
     services.AddSingleton<IIpcConnectionFactory, IpcConnectionFactory>();
     services.AddSingleton<ICallbackStoreFactory, CallbackStoreFactory>();
     services.AddSingleton<IIpcRouter, IpcRouter>();

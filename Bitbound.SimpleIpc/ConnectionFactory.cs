@@ -15,15 +15,14 @@ public interface IIpcConnectionFactory
   Task<IIpcServer> CreateServer(string pipeName, PipeSecurity pipeSecurity);
 }
 
-public class IpcConnectionFactory(ICallbackStoreFactory callbackFactory, ILoggerFactory loggerFactory) : IIpcConnectionFactory
+public class IpcConnectionFactory(
+  ICallbackStoreFactory callbackFactory,
+  IContentTypeResolver contentTypeResolver,
+  ILoggerFactory loggerFactory) : IIpcConnectionFactory
 {
-  private static IIpcConnectionFactory? _default;
   private readonly ICallbackStoreFactory _callbackFactory = callbackFactory;
+  private readonly IContentTypeResolver _contentTypeResolver = contentTypeResolver;
   private readonly ILoggerFactory _loggerFactory = loggerFactory;
-
-  public static IIpcConnectionFactory Default =>
-      _default ??=
-      new IpcConnectionFactory(new CallbackStoreFactory(new LoggerFactory()), new LoggerFactory());
 
   public Task<IIpcClient> CreateClient(string serverName, string pipeName)
   {
@@ -31,6 +30,7 @@ public class IpcConnectionFactory(ICallbackStoreFactory callbackFactory, ILogger
         serverName,
         pipeName,
         _callbackFactory,
+        _contentTypeResolver,
         _loggerFactory.CreateLogger<IpcClient>());
     return Task.FromResult((IIpcClient)client);
   }
@@ -40,6 +40,7 @@ public class IpcConnectionFactory(ICallbackStoreFactory callbackFactory, ILogger
     var server = new IpcServer(
         pipeName,
         _callbackFactory,
+        _contentTypeResolver,
         _loggerFactory.CreateLogger<IpcServer>());
     return Task.FromResult((IIpcServer)server);
   }
@@ -51,6 +52,7 @@ public class IpcConnectionFactory(ICallbackStoreFactory callbackFactory, ILogger
         pipeName,
         pipeSecurity,
         _callbackFactory,
+        _contentTypeResolver,
         _loggerFactory.CreateLogger<IpcServer>());
     return Task.FromResult((IIpcServer)server);
   }

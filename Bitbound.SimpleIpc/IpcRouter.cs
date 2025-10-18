@@ -43,11 +43,8 @@ public interface IIpcRouter
 public class IpcRouter(IIpcConnectionFactory serverFactory, ILogger<IpcRouter> logger) : IIpcRouter
 {
   private static readonly ConcurrentDictionary<string, IIpcServer> _pipeStreams = new();
-  private static IpcRouter? _default;
   private readonly ILogger<IpcRouter> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
   private readonly IIpcConnectionFactory _serverFactory = serverFactory ?? throw new ArgumentNullException(nameof(serverFactory));
-
-  public static IIpcRouter Default => _default ??= new IpcRouter(IpcConnectionFactory.Default, new LoggerFactory().CreateLogger<IpcRouter>());
 
   public async Task<IIpcServer> CreateServer()
   {
@@ -83,7 +80,7 @@ public class IpcRouter(IIpcConnectionFactory serverFactory, ILogger<IpcRouter> l
       throw new ArgumentNullException(nameof(pipeName));
     }
 
-    _logger.LogDebug("Creating pipe message server {name}.", pipeName);
+    _logger.LogDebug("Creating pipe message server {PipeName}.", pipeName);
 
     var serverConnection = await _serverFactory.CreateServer(pipeName);
 
@@ -105,7 +102,7 @@ public class IpcRouter(IIpcConnectionFactory serverFactory, ILogger<IpcRouter> l
       throw new ArgumentNullException(nameof(pipeName));
     }
 
-    _logger.LogDebug("Creating pipe message server {name}.", pipeName);
+    _logger.LogDebug("Creating pipe message server {PipeName}.", pipeName);
 
     var serverConnection = await _serverFactory.CreateServer(pipeName, pipeSecurity);
 
@@ -119,15 +116,17 @@ public class IpcRouter(IIpcConnectionFactory serverFactory, ILogger<IpcRouter> l
     return serverConnection;
   }
 
-  private void ServerConnection_ReadingEnded(object? sender, IConnectionBase args)
+  private void ServerConnection_ReadingEnded(object? sender, EventArgs e)
   {
-    if (_pipeStreams.TryRemove(args.PipeName, out var server))
+    if (sender is not IConnectionBase connection) return;
+
+    if (_pipeStreams.TryRemove(connection.PipeName, out var server))
     {
       server.ReadingEnded -= ServerConnection_ReadingEnded;
     }
     else
     {
-      _logger.LogWarning("Pipe name {pipeName} not found.", args.PipeName);
+      _logger.LogWarning("Pipe name {PipeName} not found.", connection.PipeName);
     }
   }
 }

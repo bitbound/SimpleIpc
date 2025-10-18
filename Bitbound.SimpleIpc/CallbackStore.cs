@@ -23,12 +23,13 @@ public interface ICallbackStore
   bool TryRemove(Type type, CallbackToken token);
 }
 
-internal class CallbackStore(ILogger<CallbackStore> logger) : ICallbackStore
+internal class CallbackStore(IContentTypeResolver contentTypeResolver, ILogger<CallbackStore> logger) : ICallbackStore
 {
   private readonly ConcurrentDictionary<Type, List<IpcAction>> _actions = new();
   private readonly SemaphoreSlim _actionsLock = new(1, 1);
   private readonly ConcurrentDictionary<Type, List<IpcFunc>> _funcs = new();
   private readonly SemaphoreSlim _funcsLock = new(1, 1);
+  private readonly IContentTypeResolver _contentTypeResolver = contentTypeResolver;
   private readonly ILogger<CallbackStore> _logger = logger;
 
   public CallbackToken Add(Type contentType, Action<object> callback)
@@ -78,20 +79,26 @@ internal class CallbackStore(ILogger<CallbackStore> logger) : ICallbackStore
       return;
     }
 
+    var contentType = _contentTypeResolver.ResolveType(wrapper.ContentTypeName);
+    if (contentType is null)
+    {
+      return;
+    }
+
     try
     {
       await _actionsLock.WaitAsync();
 
-      if (!_actions.TryGetValue(wrapper.ContentType, out var actions))
+      if (!_actions.TryGetValue(contentType, out var actions))
       {
         return;
       }
 
       foreach (var callback in actions)
       {
-        if (callback.ContentType == wrapper.ContentType)
+        if (callback.ContentType == contentType)
         {
-          var content = MessagePackSerializer.Deserialize(wrapper.ContentType, wrapper.Content);
+          var content = MessagePackSerializer.Deserialize(contentType, wrapper.Content);
           if (content is null)
           {
             _logger.LogError("Failed to deserialize message wrapper.");
@@ -114,11 +121,17 @@ internal class CallbackStore(ILogger<CallbackStore> logger) : ICallbackStore
       return;
     }
 
+    var contentType = _contentTypeResolver.ResolveType(wrapper.ContentTypeName);
+    if (contentType is null)
+    {
+      return;
+    }
+
     try
     {
       await _funcsLock.WaitAsync();
 
-      if (!_funcs.TryGetValue(wrapper.ContentType, out var funcs))
+      if (!_funcs.TryGetValue(contentType, out var funcs))
       {
         return;
       }
@@ -132,9 +145,9 @@ internal class CallbackStore(ILogger<CallbackStore> logger) : ICallbackStore
         {
           result = func.Handler?.Invoke();
         }
-        else if (func.ContentType == wrapper.ContentType)
+        else if (func.ContentType == contentType)
         {
-          var content = MessagePackSerializer.Deserialize(wrapper.ContentType, wrapper.Content);
+          var content = MessagePackSerializer.Deserialize(contentType, wrapper.Content);
           if (content is null)
           {
             _logger.LogError("Failed to deserialize message wrapper.");

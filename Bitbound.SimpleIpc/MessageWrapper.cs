@@ -8,10 +8,10 @@ namespace Bitbound.SimpleIpc;
 public class MessageWrapper
 {
   [SerializationConstructor]
-  public MessageWrapper(Type contentType, byte[] content, MessageType messageType, Guid responseTo)
+  public MessageWrapper(string contentTypeName, byte[] content, MessageType messageType, Guid responseTo)
   {
     Id = Guid.NewGuid();
-    ContentType = contentType;
+    ContentTypeName = contentTypeName;
     Content = content;
     MessageType = messageType;
     ResponseTo = responseTo;
@@ -21,7 +21,7 @@ public class MessageWrapper
   {
     Id = Guid.NewGuid();
     Content = MessagePackSerializer.Serialize(contentType, content);
-    ContentType = contentType;
+    ContentTypeName = contentType.FullName ?? contentType.Name;
     MessageType = messageType;
   }
 
@@ -38,7 +38,7 @@ public class MessageWrapper
   public byte[] Content { get; set; } = [];
 
   [DataMember]
-  public Type ContentType { get; set; }
+  public string ContentTypeName { get; set; } = string.Empty;
 
   [DataMember]
   public MessageType MessageType { get; set; }

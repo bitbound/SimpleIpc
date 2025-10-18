@@ -6,7 +6,6 @@ NuGet: https://www.nuget.org/packages/Bitbound.SimpleIpc/
 
 ## Quick Start
 
-With Dependency Injection:
 ```
 var serviceCollection = new ServiceCollection();
 serviceCollection.AddSimpleIpc();
@@ -14,12 +13,6 @@ var provider = serviceCollection.BuildServiceProvider();
 
 var router = provider.GetRequiredService<IIpcRouter>();
 var connectionFactory = provider.GetRequiredService<IConnectionFactory>();
-```
-
-Without Dependency Injection:
-```
-var router = SimpleIpc.Router.Default;
-var connectionFactory = SimpleIpc.ConnectionFactory.Default;
 ```
 
 Then:

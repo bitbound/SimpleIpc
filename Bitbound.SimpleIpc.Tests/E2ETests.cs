@@ -1,5 +1,4 @@
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 using System.Diagnostics;
@@ -28,7 +27,7 @@ public class E2ETests
     _services = serviceCollection.BuildServiceProvider();
 
     _pipeName = Guid.NewGuid().ToString();
-    _cts = new CancellationTokenSource();
+    _cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
 
     _connectionFactory = _services.GetRequiredService<IIpcConnectionFactory>();
     _server = await _connectionFactory.CreateServer(_pipeName);
@@ -51,7 +50,7 @@ public class E2ETests
   public async Task Send_GivenIdealScenario_ReceivesMessages()
   {
     _ = _server.WaitForConnection(_cts.Token);
-    var result = await _client.Connect(1000);
+    var result = await _client.Connect(_cts.Token);
 
     Assert.IsTrue(result);
 
@@ -89,7 +88,7 @@ public class E2ETests
   public async Task RemoveAll_GivenValidType_RemovesAll()
   {
     _ = _server.WaitForConnection(_cts.Token);
-    var result = await _client.Connect(1000);
+    var result = await _client.Connect(_cts.Token);
 
     Assert.IsTrue(result);
 
@@ -123,7 +122,7 @@ public class E2ETests
   public async Task RemoveAll_GivenInvalidType_RemovesNone()
   {
     _ = _server.WaitForConnection(_cts.Token);
-    var result = await _client.Connect(1000);
+    var result = await _client.Connect(_cts.Token);
 
     Assert.IsTrue(result);
 
@@ -159,7 +158,7 @@ public class E2ETests
   public async Task RemoveAll_GivenValidToken_RemovesOne()
   {
     _ = _server.WaitForConnection(_cts.Token);
-    var result = await _client.Connect(1000);
+    var result = await _client.Connect(_cts.Token);
 
     Assert.IsTrue(result);
 
@@ -199,7 +198,7 @@ public class E2ETests
   public async Task Invoke_GivenIdealScenario_ReturnsValue()
   {
     _ = _server.WaitForConnection(_cts.Token);
-    var result = await _client.Connect(1000);
+    var result = await _client.Connect(_cts.Token);
 
     Assert.IsTrue(result);
 
@@ -226,12 +225,12 @@ public class E2ETests
   [TestMethod]
   public async Task Send_GivenIdealScenario_OkThroughput()
   {
-    var connectionFactory = new IpcConnectionFactory(new CallbackStoreFactory(new LoggerFactory()), new LoggerFactory());
+    var connectionFactory = _services.GetRequiredService<IIpcConnectionFactory>();
     var server = await connectionFactory.CreateServer("throughput-test");
     var client = await connectionFactory.CreateClient(".", "throughput-test");
 
     _ = server.WaitForConnection(CancellationToken.None);
-    var result = await client.Connect(1000);
+    var result = await client.Connect(_cts.Token);
 
     Assert.IsTrue(result);
 
@@ -265,7 +264,7 @@ public class E2ETests
 
     Console.WriteLine($"{bytesReceived:N0} total bytes received in {sw.Elapsed.TotalMilliseconds:N} milliseconds.");
     Console.WriteLine($"Mbps: {mbps:N}");
-    Assert.IsTrue(mbps > 500);
+    Assert.IsGreaterThan(1_000, mbps);
   }
 
   [DataContract]

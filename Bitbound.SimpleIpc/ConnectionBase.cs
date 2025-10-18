@@ -11,9 +11,9 @@ namespace Bitbound.SimpleIpc;
 
 public interface IConnectionBase : IDisposable
 {
-  event EventHandler<IConnectionBase> ReadingEnded;
-
+  event EventHandler ReadingEnded;
   bool IsConnected { get; }
+  bool IsDisposed { get; }
   string PipeName { get; }
 
   void BeginRead(CancellationToken cancellationToken);
@@ -33,43 +33,67 @@ public interface IConnectionBase : IDisposable
 
   Task Send<TContentType>(TContentType content, int timeoutMs = 5000)
        where TContentType : notnull;
+
+  Task Send<TContentType>(TContentType content, CancellationToken cancellationToken)
+       where TContentType : notnull;
+  Task WaitForConnectionEnd(CancellationToken cancellationToken);
 }
 
 internal abstract class ConnectionBase(
     string pipeName,
     ICallbackStoreFactory callbackFactory,
+    IContentTypeResolver contentTypeResolver,
     ILogger logger) : IConnectionBase
 {
   protected readonly SemaphoreSlim _connectLock = new(1, 1);
   protected readonly ILogger _logger = logger ?? throw new ArgumentNullException(nameof(logger));
   protected PipeStream? _pipeStream;
 
-  private readonly ICallbackStore _callbackStore = callbackFactory?.Create() ?? 
+  private readonly ICallbackStore _callbackStore = callbackFactory?.Create() ??
     throw new ArgumentNullException(nameof(callbackFactory));
+  private readonly IContentTypeResolver _contentTypeResolver = contentTypeResolver ??
+    throw new ArgumentNullException(nameof(contentTypeResolver));
 
   private readonly ConcurrentDictionary<Guid, TaskCompletionSource<MessageWrapper>> _invokesPendingCompletion = new();
-
-  private CancellationToken _readStreamCancelToken;
+  private bool _isDisposed;
   private Task? _readTask;
 
-  public event EventHandler<IConnectionBase>? ReadingEnded;
+  public event EventHandler? ReadingEnded;
 
   public bool IsConnected => _pipeStream?.IsConnected ?? false;
+  public bool IsDisposed => _isDisposed;
   public string PipeName { get; } = pipeName;
 
   public void BeginRead(CancellationToken cancellationToken)
   {
+    if (_isDisposed)
+    {
+      throw new ObjectDisposedException(nameof(ConnectionBase), "Connection has been disposed.");
+    }
+
     if (_readTask?.IsCompleted == false)
     {
       throw new InvalidOperationException("Stream is already being read.");
     }
 
-    _readStreamCancelToken = cancellationToken;
-    _readTask = Task.Run(ReadFromStream, cancellationToken);
+    _readTask = ReadFromStream(cancellationToken);
   }
 
   public void Dispose()
   {
+    if (_isDisposed)
+    {
+      return;
+    }
+    _isDisposed = true;
+    try
+    {
+      _pipeStream?.Close();
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Error while closing pipe stream.");
+    }
     _pipeStream?.Dispose();
   }
 
@@ -85,7 +109,7 @@ internal abstract class ConnectionBase(
       var tcs = new TaskCompletionSource<MessageWrapper>();
       if (!_invokesPendingCompletion.TryAdd(wrapper.Id, tcs))
       {
-        _logger.LogWarning("Already waiting for invoke completion of message ID {id}.", wrapper.Id);
+        _logger.LogWarning("Already waiting for invoke completion of message ID {Id}.", wrapper.Id);
         return IpcResult.Fail<TReturnType>($"Already waiting for invoke completion of message ID {wrapper.Id}.");
       }
 
@@ -95,14 +119,20 @@ internal abstract class ConnectionBase(
 
       if (!tcs.Task.IsCompleted)
       {
-        _logger.LogWarning("Timed out while invoking message type {contentType}.", wrapper.ContentType);
+        _logger.LogWarning("Timed out while invoking message type {ContentType}.", wrapper.ContentTypeName);
 
         return IpcResult.Fail<TReturnType>("Timed out while invoking message.");
       }
 
       var result = tcs.Task.Result;
 
-      var deserialized = MessagePackSerializer.Deserialize(result.ContentType, result.Content);
+      var resultContentType = _contentTypeResolver.ResolveType(result.ContentTypeName);
+      if (resultContentType is null)
+      {
+        return IpcResult.Fail<TReturnType>("Content type is null in response.");
+      }
+
+      var deserialized = MessagePackSerializer.Deserialize(resultContentType, result.Content);
       if (deserialized is TReturnType typedResult)
       {
         return IpcResult.Ok(typedResult);
@@ -132,7 +162,7 @@ internal abstract class ConnectionBase(
   {
     if (!_callbackStore.TryRemoveAll(typeof(TContentType)))
     {
-      _logger.LogWarning("The message type {contentType} wasn't found in the callback colection.", typeof(TContentType));
+      _logger.LogWarning("The message type {ContentType} wasn't found in the callback colection.", typeof(TContentType));
     }
   }
 
@@ -140,7 +170,7 @@ internal abstract class ConnectionBase(
   {
     if (!_callbackStore.TryRemove(typeof(TContentType), callbackToken))
     {
-      _logger.LogWarning("The message type {contentType} wasn't found in the callback colection.", typeof(TContentType));
+      _logger.LogWarning("The message type {ContentType} wasn't found in the callback colection.", typeof(TContentType));
     }
   }
 
@@ -166,12 +196,30 @@ internal abstract class ConnectionBase(
   public Task Send<TContentType>(TContentType content, int timeoutMs = 5000)
       where TContentType : notnull
   {
-    return SendInternal(typeof(TContentType), content, timeoutMs);
+    var wrapper = new MessageWrapper(typeof(TContentType), content, MessageType.Send);
+    return SendInternal(wrapper, timeoutMs);
   }
 
-  private void OnReadingEnded()
+  public Task Send<TContentType>(TContentType content, CancellationToken cancellationToken)
+    where TContentType : notnull
   {
-    ReadingEnded?.Invoke(this, this);
+    var wrapper = new MessageWrapper(typeof(TContentType), content, MessageType.Send);
+    return SendInternal(wrapper, cancellationToken);
+  }
+
+  public async Task WaitForConnectionEnd(CancellationToken cancellationToken)
+  {
+    if (_readTask is null)
+    {
+      throw new InvalidOperationException("Connection has not been started. Call BeginRead first.");
+    }
+
+    if (_readTask.IsCompleted)
+    {
+      throw new InvalidOperationException("Connection has already ended.");
+    }
+
+    await _readTask.WaitAsync(cancellationToken);
   }
 
   private async Task ProcessMessage(MessageWrapper wrapper)
@@ -201,48 +249,77 @@ internal abstract class ConnectionBase(
         }
       case MessageType.Unspecified:
       default:
-        _logger.LogWarning("Unexpected message type: {messageType}", wrapper.MessageType);
+        _logger.LogWarning("Unexpected message type: {MessageType}", wrapper.MessageType);
         break;
     }
   }
 
-  private async Task ReadFromStream()
+  private async Task ReadFromStream(CancellationToken cancellationToken)
   {
     while (_pipeStream?.IsConnected == true)
     {
       try
       {
-        if (_readStreamCancelToken.IsCancellationRequested)
+        if (cancellationToken.IsCancellationRequested)
         {
-          _logger.LogDebug("IPC connection read cancellation requested.  Pipe Name: {pipeName}", PipeName);
+          _logger.LogDebug("IPC connection read cancellation requested.  Pipe Name: {PipeName}", PipeName);
+          break;
+        }
+
+        // Check if the pipe is still connected before attempting to read
+        if (!_pipeStream.IsConnected)
+        {
+          _logger.LogInformation("Pipe stream is no longer connected.");
           break;
         }
 
         var messageSizeBuffer = new byte[4];
-        var bytesRead = 0;
+        var sizeBytesRead = 0;
 
-        while (bytesRead < 4)
+        // Read the 4-byte message size header
+        while (sizeBytesRead < 4)
         {
-          bytesRead += await _pipeStream.ReadAsync(messageSizeBuffer.AsMemory(0, 4), _readStreamCancelToken);
+          var bytesRead = await _pipeStream.ReadAsync(messageSizeBuffer.AsMemory(sizeBytesRead, 4 - sizeBytesRead), cancellationToken);
+          if (bytesRead == 0)
+          {
+            // Stream was closed by the other end
+            _logger.LogInformation("Pipe stream was closed while reading message size header.");
+            break;
+          }
+          sizeBytesRead += bytesRead;
         }
 
         var messageSize = BitConverter.ToInt32(messageSizeBuffer, 0);
 
-        var buffer = new byte[messageSize];
-
-
-        while (bytesRead < messageSize)
+        if (messageSize is <= 0 or > 100_000_000) // 100MB max message size
         {
-          bytesRead += await _pipeStream.ReadAsync(buffer.AsMemory(0, messageSize), _readStreamCancelToken);
+          _logger.LogWarning("Invalid message size received: {MessageSize}. Closing connection.", messageSize);
+          break;
         }
 
-        var wrapper = MessagePackSerializer.Deserialize<MessageWrapper>(buffer);
+        var buffer = new byte[messageSize];
+        var messageBytesRead = 0;
+
+        // Read the message content
+        while (messageBytesRead < messageSize)
+        {
+          var bytesRead = await _pipeStream.ReadAsync(buffer.AsMemory(messageBytesRead, messageSize - messageBytesRead), cancellationToken);
+          if (bytesRead == 0)
+          {
+            // Stream was closed by the other end
+            _logger.LogInformation("Pipe stream was closed while reading message content.");
+            break;
+          }
+          messageBytesRead += bytesRead;
+        }
+
+        var wrapper = MessagePackSerializer.Deserialize<MessageWrapper>(buffer, cancellationToken: cancellationToken);
 
         await ProcessMessage(wrapper);
       }
       catch (ThreadAbortException ex)
       {
-        _logger.LogInformation(ex, "IPC connection aborted.  Pipe Name: {pipeName}", PipeName);
+        _logger.LogInformation(ex, "IPC connection aborted.  Pipe Name: {PipeName}", PipeName);
         break;
       }
       catch (TaskCanceledException)
@@ -253,6 +330,16 @@ internal abstract class ConnectionBase(
       catch (MessagePackSerializationException ex) when (ex.InnerException is EndOfStreamException)
       {
         _logger.LogInformation("Pipe was closed at the other end.");
+        break;
+      }
+      catch (IOException ex)
+      {
+        _logger.LogInformation(ex, "IO error occurred, likely due to pipe being closed by the other end.");
+        break;
+      }
+      catch (InvalidOperationException ex) when (ex.Message.Contains("pipe") || ex.Message.Contains("stream"))
+      {
+        _logger.LogInformation(ex, "Pipe operation failed, likely due to connection being closed.");
         break;
       }
       catch (Exception ex) when (ex.Message == "The operation was canceled.")
@@ -267,42 +354,40 @@ internal abstract class ConnectionBase(
       }
     }
 
-    _logger.LogDebug("IPC stream reading ended. Pipe Name: {pipeName}", PipeName);
-    OnReadingEnded();
-  }
-
-  private Task SendInternal(Type contentType, object content, int timeoutMs = 5000)
-  {
-    var wrapper = new MessageWrapper(contentType, content, MessageType.Send);
-    return SendInternal(wrapper, timeoutMs);
+    _logger.LogInformation("IPC stream reading ended. Pipe Name: {PipeName}", PipeName);
+    ReadingEnded?.Invoke(this, EventArgs.Empty);
   }
 
   private async Task SendInternal(MessageWrapper wrapper, int timeoutMs = 5000)
   {
+    if (timeoutMs < 1)
+    {
+      throw new ArgumentException("Timeout must be greater than 0.");
+    }
+
+    using var cts = new CancellationTokenSource(timeoutMs);
+    await SendInternal(wrapper, cts.Token);
+  }
+
+  private async Task SendInternal(MessageWrapper wrapper, CancellationToken cancellationToken)
+  {
     try
     {
-      if (timeoutMs < 1)
-      {
-        throw new ArgumentException("Timeout must be greater than 0.");
-      }
-
       if (_pipeStream is null)
       {
         throw new InvalidOperationException("Pipe stream hasn't been created yet.");
       }
 
-      using var cts = new CancellationTokenSource(timeoutMs);
-      var wrapperBytes = MessagePackSerializer.Serialize(wrapper);
+      var wrapperBytes = MessagePackSerializer.Serialize(wrapper, cancellationToken: cancellationToken);
 
       var messageSizeBuffer = BitConverter.GetBytes(wrapperBytes.Length);
-      await _pipeStream.WriteAsync(messageSizeBuffer, cts.Token);
-
-      await _pipeStream.WriteAsync(wrapperBytes, cts.Token);
-      await _pipeStream.FlushAsync();
+      await _pipeStream.WriteAsync(messageSizeBuffer, cancellationToken);
+      await _pipeStream.WriteAsync(wrapperBytes, cancellationToken);
+      await _pipeStream.FlushAsync(cancellationToken);
     }
     catch (Exception ex)
     {
-      _logger.LogWarning(ex, "Error sending message.  Content Type: {contentType}", wrapper.ContentType);
+      _logger.LogWarning(ex, "Error sending message.  Content Type: {contentType}", wrapper.ContentTypeName);
     }
   }
 }

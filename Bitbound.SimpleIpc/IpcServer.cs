@@ -17,13 +17,14 @@ internal class IpcServer : ConnectionBase, IIpcServer
   public IpcServer(
       string pipeName,
       ICallbackStoreFactory callbackFactory,
+      IContentTypeResolver contentTypeResolver,
       ILogger<IpcServer> logger)
-      : base(pipeName, callbackFactory, logger)
+      : base(pipeName, callbackFactory, contentTypeResolver, logger)
   {
     _pipeStream = new NamedPipeServerStream(
         pipeName,
         PipeDirection.InOut,
-        1,
+        NamedPipeServerStream.MaxAllowedServerInstances,
         PipeTransmissionMode.Byte,
         PipeOptions.Asynchronous);
   }
@@ -33,13 +34,14 @@ internal class IpcServer : ConnectionBase, IIpcServer
       string pipeName,
       PipeSecurity pipeSecurity,
       ICallbackStoreFactory callbackFactory,
+      IContentTypeResolver contentTypeResolver,
       ILogger<IpcServer> logger)
-      : base(pipeName, callbackFactory, logger)
+      : base(pipeName, callbackFactory, contentTypeResolver, logger)
   {
     _pipeStream = NamedPipeServerStreamAcl.Create(
         pipeName,
         PipeDirection.InOut,
-        1,
+        NamedPipeServerStream.MaxAllowedServerInstances,
         PipeTransmissionMode.Byte,
         PipeOptions.Asynchronous,
         0,
@@ -51,7 +53,7 @@ internal class IpcServer : ConnectionBase, IIpcServer
   {
     try
     {
-      await _connectLock.WaitAsync();
+      await _connectLock.WaitAsync(cancellationToken);
 
       if (_pipeStream is null)
       {
@@ -70,6 +72,7 @@ internal class IpcServer : ConnectionBase, IIpcServer
 
       if (!_pipeStream.IsConnected)
       {
+        _logger.LogWarning("Pipe disconnected after initial acceptance.");
         return false;
       }
 

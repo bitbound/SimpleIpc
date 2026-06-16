@@ -1,26 +1,24 @@
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 using System.Diagnostics;
 using System.Runtime.Serialization;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
 
 namespace Bitbound.SimpleIpc.Tests;
 
-[TestClass]
 public class E2ETests
 {
-  private ServiceProvider _services;
-  private string _pipeName;
-  private CancellationTokenSource _cts;
-  private IIpcConnectionFactory _connectionFactory;
-  private IIpcServer _server;
-  private IIpcClient _client;
+  private readonly ServiceProvider _services;
+  private readonly string _pipeName;
+  private readonly CancellationTokenSource _cts;
+  private readonly IIpcConnectionFactory _connectionFactory;
+  private readonly IIpcServer _server;
+  private readonly IIpcClient _client;
 
-  [TestInitialize]
-  public async Task TestInit()
+  public E2ETests()
   {
     var serviceCollection = new ServiceCollection();
     serviceCollection.AddSimpleIpc();
@@ -30,11 +28,11 @@ public class E2ETests
     _cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
 
     _connectionFactory = _services.GetRequiredService<IIpcConnectionFactory>();
-    _server = await _connectionFactory.CreateServer(_pipeName);
-    _client = await _connectionFactory.CreateClient(".", _pipeName);
+    _server = Task.Run(async () => await _connectionFactory.CreateServer(_pipeName)).Result;
+    _client = Task.Run(async () => await _connectionFactory.CreateClient(".", _pipeName)).Result;
   }
 
-  [TestMethod]
+  [Fact]
   public async Task WaitForConnection_GivenTokenIsCancelled_ReturnsFalse()
   {
     var waitTask = _server.WaitForConnection(_cts.Token);
@@ -43,16 +41,16 @@ public class E2ETests
     _cts.Cancel();
     await Task.Delay(10);
 
-    Assert.IsFalse(waitTask.Result);
+    Assert.False(await waitTask);
   }
 
-  [TestMethod]
+  [Fact]
   public async Task Send_GivenIdealScenario_ReceivesMessages()
   {
     _ = _server.WaitForConnection(_cts.Token);
     var result = await _client.Connect(_cts.Token);
 
-    Assert.IsTrue(result);
+    Assert.True(result);
 
     var pingFromServer = string.Empty;
     var pongFromClient = string.Empty;
@@ -80,17 +78,17 @@ public class E2ETests
         !string.IsNullOrWhiteSpace(pongFromClient),
         TimeSpan.FromSeconds(1));
 
-    Assert.AreEqual("Ping from server", pingFromServer);
-    Assert.AreEqual("Pong from client", pongFromClient);
+    Assert.Equal("Ping from server", pingFromServer);
+    Assert.Equal("Pong from client", pongFromClient);
   }
 
-  [TestMethod]
+  [Fact]
   public async Task RemoveAll_GivenValidType_RemovesAll()
   {
     _ = _server.WaitForConnection(_cts.Token);
     var result = await _client.Connect(_cts.Token);
 
-    Assert.IsTrue(result);
+    Assert.True(result);
 
     var count = 0;
 
@@ -108,23 +106,23 @@ public class E2ETests
         count > 0,
         TimeSpan.FromSeconds(1));
 
-    Assert.AreEqual(1, count);
+    Assert.Equal(1, count);
 
     _server.Off<Ping>();
 
     await _client.Send(new Ping());
     await Task.Delay(1_000);
 
-    Assert.AreEqual(1, count);
+    Assert.Equal(1, count);
   }
 
-  [TestMethod]
+  [Fact]
   public async Task RemoveAll_GivenInvalidType_RemovesNone()
   {
     _ = _server.WaitForConnection(_cts.Token);
     var result = await _client.Connect(_cts.Token);
 
-    Assert.IsTrue(result);
+    Assert.True(result);
 
     var count = 0;
 
@@ -142,7 +140,7 @@ public class E2ETests
         count > 0,
         TimeSpan.FromSeconds(1));
 
-    Assert.AreEqual(1, count);
+    Assert.Equal(1, count);
 
     _server.Off<Pong>();
 
@@ -151,16 +149,16 @@ public class E2ETests
       count > 1,
       TimeSpan.FromSeconds(1));
 
-    Assert.AreEqual(2, count);
+    Assert.Equal(2, count);
   }
 
-  [TestMethod]
+  [Fact]
   public async Task RemoveAll_GivenValidToken_RemovesOne()
   {
     _ = _server.WaitForConnection(_cts.Token);
     var result = await _client.Connect(_cts.Token);
 
-    Assert.IsTrue(result);
+    Assert.True(result);
 
     var count = 0;
 
@@ -182,7 +180,7 @@ public class E2ETests
         count > 1,
         TimeSpan.FromSeconds(1));
 
-    Assert.AreEqual(2, count);
+    Assert.Equal(2, count);
 
     _server.Off<Ping>(token1);
 
@@ -191,16 +189,16 @@ public class E2ETests
       count > 2,
       TimeSpan.FromSeconds(1));
 
-    Assert.AreEqual(3, count);
+    Assert.Equal(3, count);
   }
 
-  [TestMethod]
+  [Fact]
   public async Task Invoke_GivenIdealScenario_ReturnsValue()
   {
     _ = _server.WaitForConnection(_cts.Token);
     var result = await _client.Connect(_cts.Token);
 
-    Assert.IsTrue(result);
+    Assert.True(result);
 
     _client.On((Ping pong) =>
     {
@@ -218,11 +216,11 @@ public class E2ETests
     var serverResponse = await _client.Invoke<Ping, Pong>(new Ping("Client Ping"), 1000);
     var clientResponse = await _server.Invoke<Ping, Pong>(new Ping("Server Ping"), 1000);
 
-    Assert.AreEqual("Pong from Client: Server Ping", clientResponse.Value.Message);
-    Assert.AreEqual("Pong from Server: Client Ping", serverResponse.Value.Message);
+    Assert.Equal("Pong from Client: Server Ping", clientResponse.Value.Message);
+    Assert.Equal("Pong from Server: Client Ping", serverResponse.Value.Message);
   }
 
-  [TestMethod]
+  [Fact]
   public async Task Send_GivenIdealScenario_OkThroughput()
   {
     var connectionFactory = _services.GetRequiredService<IIpcConnectionFactory>();
@@ -232,7 +230,7 @@ public class E2ETests
     _ = server.WaitForConnection(CancellationToken.None);
     var result = await client.Connect(_cts.Token);
 
-    Assert.IsTrue(result);
+    Assert.True(result);
 
     var bytesReceived = 0;
 
@@ -260,11 +258,11 @@ public class E2ETests
     }
     sw.Stop();
 
-    var mbps = bytesReceived / 1024 / 1024 * 8 / sw.Elapsed.TotalSeconds;
+    var mbps = bytesReceived / 1024 / 1024 * 8.0 / sw.Elapsed.TotalSeconds;
 
     Console.WriteLine($"{bytesReceived:N0} total bytes received in {sw.Elapsed.TotalMilliseconds:N} milliseconds.");
     Console.WriteLine($"Mbps: {mbps:N}");
-    Assert.IsGreaterThan(1_000, mbps);
+    Assert.True(mbps > 1_000);
   }
 
   [DataContract]

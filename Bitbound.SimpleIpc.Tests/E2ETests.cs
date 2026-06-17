@@ -13,7 +13,6 @@ public class E2ETests
 {
   private readonly ServiceProvider _services;
   private readonly string _pipeName;
-  private readonly CancellationTokenSource _cts;
   private readonly IIpcConnectionFactory _connectionFactory;
   private readonly IIpcServer _server;
   private readonly IIpcClient _client;
@@ -25,7 +24,6 @@ public class E2ETests
     _services = serviceCollection.BuildServiceProvider();
 
     _pipeName = Guid.NewGuid().ToString();
-    _cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
 
     _connectionFactory = _services.GetRequiredService<IIpcConnectionFactory>();
     _server = Task.Run(async () => await _connectionFactory.CreateServer(_pipeName)).Result;
@@ -35,11 +33,12 @@ public class E2ETests
   [Fact]
   public async Task WaitForConnection_GivenTokenIsCancelled_ReturnsFalse()
   {
-    var waitTask = _server.WaitForConnection(_cts.Token);
+    using var cts = new CancellationTokenSource();
+    var waitTask = _server.WaitForConnection(cts.Token);
 
-    await Task.Delay(10);
-    _cts.Cancel();
-    await Task.Delay(10);
+    await Task.Delay(10, TestContext.Current.CancellationToken);
+    cts.Cancel();
+    await Task.Delay(10, TestContext.Current.CancellationToken);
 
     Assert.False(await waitTask);
   }
@@ -47,8 +46,10 @@ public class E2ETests
   [Fact]
   public async Task Send_GivenIdealScenario_ReceivesMessages()
   {
-    _ = _server.WaitForConnection(_cts.Token);
-    var result = await _client.Connect(_cts.Token);
+    var token = TestContext.Current.CancellationToken;
+
+    _ = _server.WaitForConnection(token);
+    var result = await _client.Connect(token);
 
     Assert.True(result);
 
@@ -68,8 +69,8 @@ public class E2ETests
       pongFromClient = pong.Message;
     });
 
-    _client.BeginRead(_cts.Token);
-    _server.BeginRead(_cts.Token);
+    _client.BeginRead(token);
+    _server.BeginRead(token);
 
     await _server.Send(new Ping("Ping from server"));
 
@@ -85,8 +86,10 @@ public class E2ETests
   [Fact]
   public async Task RemoveAll_GivenValidType_RemovesAll()
   {
-    _ = _server.WaitForConnection(_cts.Token);
-    var result = await _client.Connect(_cts.Token);
+    var token = TestContext.Current.CancellationToken;
+
+    _ = _server.WaitForConnection(token);
+    var result = await _client.Connect(token);
 
     Assert.True(result);
 
@@ -97,8 +100,8 @@ public class E2ETests
       count++;
     });
 
-    _client.BeginRead(_cts.Token);
-    _server.BeginRead(_cts.Token);
+    _client.BeginRead(token);
+    _server.BeginRead(token);
 
     await _client.Send(new Ping());
 
@@ -111,7 +114,7 @@ public class E2ETests
     _server.Off<Ping>();
 
     await _client.Send(new Ping());
-    await Task.Delay(1_000);
+    await Task.Delay(1_000, TestContext.Current.CancellationToken);
 
     Assert.Equal(1, count);
   }
@@ -119,8 +122,10 @@ public class E2ETests
   [Fact]
   public async Task RemoveAll_GivenInvalidType_RemovesNone()
   {
-    _ = _server.WaitForConnection(_cts.Token);
-    var result = await _client.Connect(_cts.Token);
+    var token = TestContext.Current.CancellationToken;
+
+    _ = _server.WaitForConnection(token);
+    var result = await _client.Connect(token);
 
     Assert.True(result);
 
@@ -131,8 +136,8 @@ public class E2ETests
       count++;
     });
 
-    _client.BeginRead(_cts.Token);
-    _server.BeginRead(_cts.Token);
+    _client.BeginRead(token);
+    _server.BeginRead(token);
 
     await _client.Send(new Ping());
 
@@ -155,8 +160,10 @@ public class E2ETests
   [Fact]
   public async Task RemoveAll_GivenValidToken_RemovesOne()
   {
-    _ = _server.WaitForConnection(_cts.Token);
-    var result = await _client.Connect(_cts.Token);
+    var token = TestContext.Current.CancellationToken;
+
+    _ = _server.WaitForConnection(token);
+    var result = await _client.Connect(token);
 
     Assert.True(result);
 
@@ -171,8 +178,8 @@ public class E2ETests
       count++;
     });
 
-    _client.BeginRead(_cts.Token);
-    _server.BeginRead(_cts.Token);
+    _client.BeginRead(token);
+    _server.BeginRead(token);
 
     await _client.Send(new Ping());
 
@@ -195,8 +202,10 @@ public class E2ETests
   [Fact]
   public async Task Invoke_GivenIdealScenario_ReturnsValue()
   {
-    _ = _server.WaitForConnection(_cts.Token);
-    var result = await _client.Connect(_cts.Token);
+    var token = TestContext.Current.CancellationToken;
+
+    _ = _server.WaitForConnection(token);
+    var result = await _client.Connect(token);
 
     Assert.True(result);
 
@@ -210,8 +219,8 @@ public class E2ETests
       return Task.FromResult(new Pong($"Pong from Server: {pong.Message}"));
     });
 
-    _client.BeginRead(_cts.Token);
-    _server.BeginRead(_cts.Token);
+    _client.BeginRead(token);
+    _server.BeginRead(token);
 
     var serverResponse = await _client.Invoke<Ping, Pong>(new Ping("Client Ping"), 1000);
     var clientResponse = await _server.Invoke<Ping, Pong>(new Ping("Server Ping"), 1000);
@@ -223,12 +232,14 @@ public class E2ETests
   [Fact]
   public async Task Send_GivenIdealScenario_OkThroughput()
   {
+    var token = TestContext.Current.CancellationToken;
+
     var connectionFactory = _services.GetRequiredService<IIpcConnectionFactory>();
     var server = await connectionFactory.CreateServer("throughput-test");
     var client = await connectionFactory.CreateClient(".", "throughput-test");
 
     _ = server.WaitForConnection(CancellationToken.None);
-    var result = await client.Connect(_cts.Token);
+    var result = await client.Connect(token);
 
     Assert.True(result);
 
@@ -239,8 +250,8 @@ public class E2ETests
       bytesReceived += image.EncodedImage.Length;
     });
 
-    client.BeginRead(_cts.Token);
-    server.BeginRead(_cts.Token);
+    client.BeginRead(token);
+    server.BeginRead(token);
 
     var buffer = RandomNumberGenerator.GetBytes(2_097_152);
 
